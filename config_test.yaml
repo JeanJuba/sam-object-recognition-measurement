@@ -1,0 +1,56 @@
+# =====================================================================
+# Configuração do Sistema de Inspeção de Qualidade com SAM
+# =====================================================================
+
+video:
+  input_path: data/videos/input.mp4   # vídeo a ser processado
+  frame_stride: 3                     # processa 1 a cada N frames (desempenho)
+  output_dir: data/output             # onde salvar vídeo anotado e CSVs
+
+preprocessing:
+  filter: gaussian        # gaussian | mean | none
+  kernel_size: 5          # ímpar (3, 5, 7...)
+
+calibration:
+  # Objeto de referência com dimensão conhecida presente na cena
+  reference:
+    type: circle              # circle (moeda) | chessboard (padrão xadrez)
+    known_diameter_mm: 27.0   # moeda de R$ 1,00 = 27 mm
+    min_radius_px: 15         # faixa de busca do círculo (ajustar à cena)
+    max_radius_px: 150
+    chessboard:
+      cols: 9                 # cantos internos (colunas)
+      rows: 6                 # cantos internos (linhas)
+      square_size_mm: 20.0
+  n_frames: 15                # frames usados na calibração (mediana)
+
+segmentation:
+  model: FastSAM-s.pt     # FastSAM-s.pt (rápido) | FastSAM-x.pt (preciso)
+  device: auto            # auto | cuda | cpu
+  imgsz: 1024
+  conf: 0.4
+  iou: 0.9
+  prompt_mode: everything # everything | auto_points (prompts por detecção de contornos)
+  min_area_px: 1500       # descarta máscaras muito pequenas (ruído)
+  max_area_ratio: 0.35    # descarta máscaras > 35% do frame (fundo/bancada)
+  border_margin_px: 5     # descarta máscaras coladas na borda do frame
+
+tracking:
+  max_distance_px: 100    # distância máx. de associação entre frames
+  max_missed_frames: 15   # frames sem detecção antes de encerrar o track
+  min_hits: 3             # detecções mínimas para o track ser considerado válido
+
+classification:
+  # Classes de peças e tolerâncias industriais (mm).
+  # O objeto é atribuído à classe de dimensões nominais mais próximas
+  # e aprovado somente se estiver dentro das faixas [min, max].
+  classes:
+    - name: peca_grande
+      length_mm: [78.0, 82.0]     # tolerância: 80 ± 2 mm
+      width_mm: [38.0, 42.0]      # tolerância: 40 ± 2 mm
+    - name: peca_media
+      length_mm: [48.0, 52.0]     # 50 ± 2 mm
+      width_mm: [48.0, 52.0]
+    - name: peca_pequena
+      length_mm: [23.0, 27.0]     # 25 ± 2 mm
+      width_mm: [23.0, 27.0]

@@ -1,0 +1,63 @@
+# =====================================================================
+# Configuração do Sistema de Inspeção de Qualidade com SAM
+# =====================================================================
+
+video:
+  input_path: data/videos/teste.mp4   # vídeo a ser processado
+  frame_stride: 3                     # processa 1 a cada N frames (desempenho)
+  output_dir: data/output             # onde salvar vídeo anotado e CSVs
+
+preprocessing:
+  filter: gaussian        # gaussian | mean | none
+  kernel_size: 5          # ímpar (3, 5, 7...)
+
+calibration:
+  # Objeto de referência com dimensão conhecida presente na cena
+  reference:
+    type: rect                # rect (pendrive/objeto retangular) | circle (moeda) | chessboard
+    # --- type: rect (pendrive de 5,5 cm no canto inferior esquerdo) ---
+    known_length_mm: 55.0     # comprimento real do pendrive
+    roi: [0.0, 0.5, 0.5, 1.0] # região onde ele aparece, frações [x0, y0, x1, y1]
+                              # (0,0 = canto sup. esquerdo; aqui = quadrante inf. esquerdo)
+    min_area_px: 500          # área mínima do contorno da referência
+    method: sam               # sam (robusto: FastSAM na ROI) | otsu (limiarização simples)
+    # --- type: circle (moeda) ---
+    known_diameter_mm: 27.0   # moeda de R$ 1,00 = 27 mm
+    min_radius_px: 15         # faixa de busca do círculo (ajustar à cena)
+    max_radius_px: 150
+    # --- type: chessboard (padrão xadrez) ---
+    chessboard:
+      cols: 9                 # cantos internos (colunas)
+      rows: 6                 # cantos internos (linhas)
+      square_size_mm: 20.0
+  n_frames: 15                # frames usados na calibração (mediana)
+
+segmentation:
+  model: FastSAM-s.pt     # FastSAM-s.pt (rápido) | FastSAM-x.pt (preciso)
+  device: auto            # auto | cuda | cpu
+  imgsz: 1024
+  conf: 0.4
+  iou: 0.9
+  prompt_mode: everything # everything | auto_points (prompts por detecção de contornos)
+  min_area_px: 1500       # descarta máscaras muito pequenas (ruído)
+  max_area_ratio: 0.35    # descarta máscaras > 35% do frame (fundo/bancada)
+  border_margin_px: 5     # descarta máscaras coladas na borda do frame
+
+tracking:
+  max_distance_px: 100    # distância máx. de associação entre frames
+  max_missed_frames: 15   # frames sem detecção antes de encerrar o track
+  min_hits: 3             # detecções mínimas para o track ser considerado válido
+
+classification:
+  # Classes de peças e tolerâncias industriais (mm).
+  # O objeto é atribuído à classe de dimensões nominais mais próximas
+  # e aprovado somente se estiver dentro das faixas [min, max].
+  classes:
+    # tolerâncias PROVISÓRIAS — meça os objetos reais (paquímetro/régua)
+    # e ajuste os nominais e as faixas
+    - name: controle_ar
+      length_mm: [115.0, 135.0]
+      width_mm: [40.0, 55.0]
+    - name: lapis
+      length_mm: [140.0, 175.0]
+      width_mm: [4.0, 12.0]
