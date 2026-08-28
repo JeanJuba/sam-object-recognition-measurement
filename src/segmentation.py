@@ -107,6 +107,7 @@ class SamSegmenter:
         min_area = float(cfg.get("min_area_px", 1500))
         max_area = float(cfg.get("max_area_ratio", 0.35)) * h * w
         margin = int(cfg.get("border_margin_px", 5))
+        max_aspect = float(cfg.get("max_aspect_ratio", 0))  # 0 = desativado
 
         objects: list[SegmentedObject] = []
         for mask_t in r.masks.data:
@@ -128,6 +129,14 @@ class SamSegmenter:
                 or ys.max() >= h - 1 - margin
             ):
                 continue
+
+            # descarta máscaras extremamente alongadas (riscos/costuras da esteira)
+            if max_aspect > 0:
+                cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if cnts:
+                    rw, rh = cv2.minAreaRect(max(cnts, key=cv2.contourArea))[1]
+                    if min(rw, rh) > 0 and max(rw, rh) / min(rw, rh) > max_aspect:
+                        continue
 
             cx, cy = int(xs.mean()), int(ys.mean())
 

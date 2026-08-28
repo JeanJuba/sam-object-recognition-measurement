@@ -48,15 +48,26 @@ def main() -> None:
         video = args.video or cfg["video"]["input_path"]
         segmenter = None
         ref = cfg["calibration"]["reference"]
-        if ref["type"] == "rect" and ref.get("method", "sam") == "sam":
+        if ref["type"] == "first_object" or (
+            ref["type"] == "rect" and ref.get("method", "sam") == "sam"
+        ):
             from src.segmentation import SamSegmenter
 
             segmenter = SamSegmenter(cfg["segmentation"])
-        calib = calibrate_from_video(video, cfg["calibration"], segmenter=segmenter)
+        calib = calibrate_from_video(
+            video,
+            cfg["calibration"],
+            segmenter=segmenter,
+            tracking_cfg=cfg.get("tracking"),
+            preprocessing_cfg=cfg.get("preprocessing"),
+            frame_stride=int(cfg["video"].get("frame_stride", 1)),
+        )
         print(f"Fator de escala: {calib.scale_mm_per_px:.5f} mm/px")
         print(f"Frames com referência detectada: {calib.n_samples}")
         if calib.reference_center:
             print(f"Centro da referência: {calib.reference_center} | raio: {calib.reference_radius_px:.1f} px")
+        if calib.reference_end_frame is not None:
+            print(f"Referência saiu de cena no frame {calib.reference_end_frame}")
 
     elif args.command == "run":
         from src.pipeline import run_pipeline

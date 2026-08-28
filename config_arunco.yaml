@@ -1,0 +1,60 @@
+# =====================================================================
+# Configuração para o vídeo arunco.mp4 (848x478, 50s): pares de
+# borrachas lado a lado na esteira azul (vertical, à esquerda) e
+# marcador ArUco impresso à direita como referência estática. Uso:
+#   python main.py --config config_arunco.yaml run
+# =====================================================================
+
+video:
+  input_path: data/videos/arunco.mp4  # vídeo a ser processado
+  frame_stride: 2                     # processa 1 a cada N frames (desempenho)
+  output_dir: data/output             # onde salvar vídeo anotado e CSVs
+
+preprocessing:
+  filter: gaussian        # gaussian | mean | none
+  kernel_size: 3          # ímpar (3, 5, 7...); kernel maior borra objetos pequenos
+
+calibration:
+  # Referência: marcador ArUco impresso no papel (quadrado preto)
+  reference:
+    type: rect                 # quadrado parado em ROI fixa
+    known_length_mm: 100.0     # lado real do marcador impresso — MEÇA COM RÉGUA E AJUSTE
+    roi: [0.60, 0.02, 0.99, 0.85] # papel à direita, frações [x0, y0, x1, y1];
+                              # x0 exclui a esteira/faixa preta e a margem branca
+                              # em volta isola o marcador no Otsu (câmera de mão:
+                              # ROI válida nos frames iniciais, que a calibração usa)
+    min_area_px: 5000          # o marcador ocupa ~200x200 px; rejeita ruído menor
+    method: otsu               # impresso preto sobre papel branco: limiarização basta
+  n_frames: 15                 # frames usados na calibração (mediana)
+
+segmentation:
+  model: FastSAM-s.pt     # FastSAM-s.pt (rápido) | FastSAM-x.pt (preciso)
+  device: auto            # auto | cuda | cpu
+  imgsz: 1024
+  conf: 0.3
+  iou: 0.9
+  prompt_mode: everything # everything | auto_points (prompts por detecção de contornos)
+  min_area_px: 2500       # descarta máscaras pequenas (etiqueta da borracha ~1800 px;
+                          # borracha inteira ~4800 px)
+  max_area_ratio: 0.30    # descarta máscaras grandes (papel, capacete, esteira)
+  border_margin_px: 5     # descarta máscaras coladas na borda do frame
+  max_aspect_ratio: 8     # descarta máscaras muito alongadas (bordas da esteira); 0 = desliga
+
+tracking:
+  max_distance_px: 120    # distância máx. de associação entre frames
+  max_missed_frames: 12   # frames sem detecção antes de encerrar o track
+  min_hits: 3             # detecções mínimas para o track ser considerado válido
+
+classification:
+  # Faixas ajustadas ao MEDIDO no vídeo assumindo marcador de 100 mm.
+  # As borrachas andam em pares lado a lado: o SAM ora funde o par
+  # (~60x25 mm), ora separa a borracha individual (~29x25 mm) — por
+  # isso as duas classes. Meça o marcador (régua) e as borrachas
+  # (paquímetro) reais e ajuste known_length_mm e estas faixas.
+  classes:
+    - name: par_borrachas
+      length_mm: [55.0, 67.0]
+      width_mm: [21.0, 30.0]
+    - name: borracha
+      length_mm: [24.0, 34.0]
+      width_mm: [21.0, 30.0]

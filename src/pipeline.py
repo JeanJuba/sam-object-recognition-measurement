@@ -11,7 +11,7 @@ from .preprocessing import apply_filter
 from .report import summarize_tracks
 from .segmentation import SamSegmenter
 from .tracking import CentroidTracker
-from .visualization import draw_calibration, draw_object
+from .visualization import draw_calibration, draw_object, draw_reference
 
 
 def run_pipeline(cfg: dict, video_path: str | None = None, show: bool = False) -> str:
@@ -28,11 +28,23 @@ def run_pipeline(cfg: dict, video_path: str | None = None, show: bool = False) -
 
     # ---------------- Fase 1: calibração ----------------
     print(f"[2/3] Calibrando com o objeto de referência de '{video_path}'...")
-    calib = calibrate_from_video(video_path, cfg["calibration"], segmenter=segmenter)
+    calib = calibrate_from_video(
+        video_path,
+        cfg["calibration"],
+        segmenter=segmenter,
+        tracking_cfg=cfg.get("tracking"),
+        preprocessing_cfg=cfg.get("preprocessing"),
+        frame_stride=int(cfg["video"].get("frame_stride", 1)),
+    )
     print(
         f"      Escala: {calib.scale_mm_per_px:.5f} mm/px "
         f"(mediana de {calib.n_samples} frames)"
     )
+    if calib.reference_end_frame is not None:
+        print(
+            f"      Referência (1º objeto) saiu no frame {calib.reference_end_frame} "
+            f"— tracks iniciados até lá serão marcados como REF"
+        )
 
     tcfg = cfg["tracking"]
     tracker = CentroidTracker(
@@ -49,12 +61,16 @@ def run_pipeline(cfg: dict, video_path: str | None = None, show: bool = False) -
     stride = int(cfg["video"].get("frame_stride", 1))
 
     out_video_path = os.path.join(out_dir, "video_anotado.mp4")
-    writer = cv2.VideoWriter(
-        out_video_path, cv2.VideoWriter_fourcc(*"mp4v"), max(fps / stride, 1.0), (w, h)
-    )
+    out_fps = max(fps / stride, 1.0)
+    # H.264 preserva texto e linhas finas muito melhor que o mp4v; nem todo
+    # OpenCV tem o codec (depende do openh264), então há fallback
+    writer = cv2.VideoWriter(out_video_path, cv2.VideoWriter_fourcc(*"avc1"), out_fps, (w, h))
+    if not writer.isOpened():
+        writer = cv2.VideoWriter(out_video_path, cv2.VideoWriter_fourcc(*"mp4v"), out_fps, (w, h))
 
     pcfg = cfg["preprocessing"]
     classes_cfg = cfg["classification"]["classes"]
+    track_first_frame: dict[int, int] = {}  # 1º frame de cada track (p/ marcar REF)
     frame_idx = 0
     processed = 0
     t0 = time.time()
@@ -66,6 +82,7 @@ def run_pipeline(cfg: dict, video_path: str | None = None, show: bool = False) -
         if frame_idx % stride != 0:
             frame_idx += 1
             continue
+        current_frame = frame_idx
         frame_idx += 1
         processed += 1
 
@@ -78,6 +95,8 @@ def run_pipeline(cfg: dict, video_path: str | None = None, show: bool = False) -
         )
 
         assignment = tracker.update([o.centroid for o in objects])
+        for tid in assignment.values():
+            track_first_frame.setdefault(tid, current_frame)
 
         annotated = frame.copy()
         draw_calibration(annotated, calib.reference_center, calib.reference_radius_px, calib.scale_mm_per_px)
@@ -88,6 +107,13 @@ def run_pipeline(cfg: dict, video_path: str | None = None, show: bool = False) -
             if m is None:
                 continue
             tid = assignment[j]
+            # referência móvel (e ruído anterior a ela): marca REF e não mede
+            if (
+                calib.reference_end_frame is not None
+                and track_first_frame[tid] <= calib.reference_end_frame
+            ):
+                draw_reference(annotated, obj.mask, m, tid)
+                continue
             tracker.active[tid].measurements.append(m)
             cls = classify(m.length_mm, m.width_mm, classes_cfg)
             draw_object(annotated, obj.mask, m, cls, tid)

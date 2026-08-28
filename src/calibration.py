@@ -21,6 +21,7 @@ class CalibrationResult:
     reference_center: tuple | None  # centro (x, y) da referência no frame
     reference_radius_px: float | None  # raio em px (se moeda)
     n_samples: int                  # nº de frames em que a referência foi detectada
+    reference_end_frame: int | None = None  # último frame da referência móvel (modo first_object)
 
 
 def detect_circle_reference(
@@ -165,6 +166,132 @@ def detect_rect_reference_sam(
     return center, float(max(w_px, h_px)), float(np.hypot(w_px, h_px) / 2)
 
 
+def calibrate_first_object(
+    video_path: str,
+    cfg: dict,
+    segmenter,
+    tracking_cfg: dict | None = None,
+    preprocessing_cfg: dict | None = None,
+    frame_stride: int = 1,
+) -> CalibrationResult:
+    """Calibra usando o PRIMEIRO objeto que atravessa a cena (esteira).
+
+    A referência é móvel: entra por uma borda, atravessa e sai. O FastSAM
+    segmenta cada frame, um tracker local acompanha o primeiro objeto válido
+    e a maior dimensão dele (``minAreaRect``) é medida em todos os frames em
+    que aparece; a escala vem da mediana dessas medições:
+
+        escala (mm/px) = known_length_mm / mediana(comprimento_px)
+
+    Também devolve ``reference_end_frame`` (último frame em que a referência
+    foi vista + margem) para o pipeline marcar como REF os tracks iniciados
+    até esse ponto.
+
+    Args:
+        cfg: bloco ``calibration`` do config.yaml.
+        segmenter: instância de ``SamSegmenter`` (obrigatório neste modo).
+        tracking_cfg: bloco ``tracking`` do config (opcional).
+        preprocessing_cfg: bloco ``preprocessing`` do config (opcional).
+        frame_stride: mesmo stride usado no pipeline, por consistência.
+    """
+    from .metrology import measure_mask
+    from .preprocessing import apply_filter
+    from .tracking import CentroidTracker
+
+    ref = cfg["reference"]
+    known_mm = float(ref["known_length_mm"])
+    min_track_frames = int(ref.get("min_track_frames", 5))
+    min_length_px = float(ref.get("min_length_px", 40))
+    max_length_px = float(ref.get("max_length_px", float("inf")))
+    max_scan_frames = int(ref.get("max_scan_frames", 900))
+
+    tcfg = tracking_cfg or {}
+    tracker = CentroidTracker(
+        max_distance_px=float(tcfg.get("max_distance_px", 100)),
+        max_missed_frames=int(tcfg.get("max_missed_frames", 15)),
+        min_hits=int(tcfg.get("min_hits", 3)),
+    )
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Não foi possível abrir o vídeo: {video_path}")
+
+    lengths: dict[int, list[float]] = {}
+    first_frame: dict[int, int] = {}
+    last_seen: dict[int, int] = {}
+    reference_tid: int | None = None
+
+    frame_idx = 0
+    while frame_idx < max_scan_frames:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if frame_idx % frame_stride != 0:
+            frame_idx += 1
+            continue
+
+        if preprocessing_cfg:
+            frame = apply_filter(
+                frame,
+                preprocessing_cfg.get("filter", "gaussian"),
+                int(preprocessing_cfg.get("kernel_size", 5)),
+            )
+
+        objects = segmenter.segment(frame)
+        assignment = tracker.update([o.centroid for o in objects])
+
+        for j, obj in enumerate(objects):
+            m = measure_mask(obj.mask, scale_mm_per_px=1.0)  # 1.0 -> medidas em px
+            if m is None:
+                continue
+            tid = assignment[j]
+            lengths.setdefault(tid, []).append(m.length_mm)
+            first_frame.setdefault(tid, frame_idx)
+            last_seen[tid] = frame_idx
+
+        # elege como referência o track mais antigo que ficou consistente
+        if reference_tid is None:
+            for tid in sorted(lengths, key=lambda t: first_frame[t]):
+                samples = lengths[tid]
+                if (
+                    len(samples) >= min_track_frames
+                    and min_length_px <= np.median(samples) <= max_length_px
+                ):
+                    reference_tid = tid
+                    break
+
+        # encerra quando a referência sai de cena (track deixou de estar ativo)
+        if reference_tid is not None and reference_tid not in tracker.active:
+            break
+
+        frame_idx += 1
+
+    cap.release()
+
+    if reference_tid is None:
+        raise RuntimeError(
+            "Nenhum objeto de referência válido passou nos frames iniciais. "
+            "Ajuste 'min_length_px'/'max_scan_frames' na calibração ou "
+            "'min_area_px'/'conf' na segmentação."
+        )
+
+    samples = np.array(lengths[reference_tid], dtype=float)
+    median_px = float(np.median(samples))
+    if median_px > 0 and float(np.std(samples)) / median_px > 0.15:
+        print(
+            "      AVISO: medições da referência instáveis "
+            f"(desvio {np.std(samples):.1f} px sobre mediana {median_px:.1f} px)"
+        )
+
+    return CalibrationResult(
+        scale_mm_per_px=known_mm / median_px,
+        reference_center=None,
+        reference_radius_px=None,
+        n_samples=len(samples),
+        reference_end_frame=last_seen[reference_tid] + 2 * frame_stride,
+    )
+
+
 def detect_chessboard_reference(
     gray: np.ndarray, cols: int, rows: int
 ) -> float | None:
@@ -189,16 +316,38 @@ def detect_chessboard_reference(
     return float(np.median(np.concatenate([dx.ravel(), dy.ravel()])))
 
 
-def calibrate_from_video(video_path: str, cfg: dict, segmenter=None) -> CalibrationResult:
+def calibrate_from_video(
+    video_path: str,
+    cfg: dict,
+    segmenter=None,
+    tracking_cfg: dict | None = None,
+    preprocessing_cfg: dict | None = None,
+    frame_stride: int = 1,
+) -> CalibrationResult:
     """Percorre os primeiros frames do vídeo e calcula o fator de escala.
 
     Args:
         video_path: caminho do vídeo.
         cfg: bloco ``calibration`` do config.yaml.
-        segmenter: ``SamSegmenter`` opcional; se fornecido e a referência for
-            do tipo ``rect`` com ``method: sam``, a detecção usa o FastSAM.
+        segmenter: ``SamSegmenter`` opcional; obrigatório no tipo
+            ``first_object`` e usado no tipo ``rect`` com ``method: sam``.
+        tracking_cfg/preprocessing_cfg/frame_stride: usados apenas pelo tipo
+            ``first_object`` (referência móvel na esteira).
     """
     ref = cfg["reference"]
+
+    if ref["type"] == "first_object":
+        if segmenter is None:
+            raise ValueError("calibração 'first_object' requer o FastSAM (segmenter)")
+        return calibrate_first_object(
+            video_path,
+            cfg,
+            segmenter,
+            tracking_cfg=tracking_cfg,
+            preprocessing_cfg=preprocessing_cfg,
+            frame_stride=frame_stride,
+        )
+
     n_frames = int(cfg.get("n_frames", 15))
 
     cap = cv2.VideoCapture(video_path)

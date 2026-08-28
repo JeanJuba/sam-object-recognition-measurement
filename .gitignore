@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pt
+*.dll
 data/output/
 runs/
 .vscode/

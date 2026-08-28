@@ -42,22 +42,31 @@ Na primeira execução o peso `FastSAM-s.pt` (~23 MB) é baixado automaticamente
 ## Uso
 
 ```powershell
-# 1. (opcional) gerar vídeo sintético de teste
+# 1. verificar a calibração (fator mm/px) do vídeo da esteira
+.venv\Scripts\python main.py calibrate
+
+# 2. pipeline completo -> data/output/video_anotado.mp4 + medicoes.csv
+.venv\Scripts\python main.py run
+
+# 3. análise de erro (MAE/MSE) contra medições de paquímetro
+.venv\Scripts\python main.py report
+
+# vídeo antigo de bancada (referência estática em ROI fixa):
+.venv\Scripts\python main.py --config config_bancada.yaml run
+
+# vídeo sintético de validação:
 .venv\Scripts\python tools\generate_test_video.py
-
-# 2. verificar a calibração (fator mm/px)
-.venv\Scripts\python main.py calibrate --video data\videos\sintetico.mp4
-
-# 3. pipeline completo -> data/output/video_anotado.mp4 + medicoes.csv
-.venv\Scripts\python main.py run --video data\videos\sintetico.mp4
-
-# 4. análise de erro (MAE/MSE) contra medições de paquímetro
-.venv\Scripts\python main.py report --ground-truth data\ground_truth_sintetico.csv
+.venv\Scripts\python main.py --config config_test.yaml run --video data\videos\sintetico.mp4
 ```
 
-Quando o **vídeo real** estiver disponível: coloque-o em `data/videos/`,
-ajuste `config.yaml` (tipo/dimensão da referência, tolerâncias das classes)
-e rode os mesmos comandos apontando para ele.
+## Modos de calibração (`calibration.reference.type`)
+
+| Tipo | Cenário |
+|---|---|
+| `first_object` | **esteira**: a referência é o 1º objeto que atravessa a cena; o FastSAM + tracker medem sua maior dimensão enquanto passa (mediana) e ele é marcado como `REF` (azul) no vídeo, fora do relatório. Dimensão real em `known_length_mm`. |
+| `rect` | objeto retangular parado em ROI fixa (ex.: pendrive na bancada) |
+| `circle` | moeda parada (Transformada de Hough) |
+| `chessboard` | padrão xadrez |
 
 ## Mapeamento para o enunciado
 

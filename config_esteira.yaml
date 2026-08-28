@@ -1,5 +1,8 @@
 # =====================================================================
-# Configuração do Sistema de Inspeção de Qualidade com SAM
+# Configuração para o vídeo esteira.mp4 (464x832, 60 fps, 37 s):
+# esteira cinza com peças passando uma a uma (moeda de referência,
+# parafusos, porcas, arruela). Mesmo conteúdo do config.yaml padrão. Uso:
+#   python main.py --config config_esteira.yaml run
 # =====================================================================
 
 video:
@@ -9,33 +12,17 @@ video:
 
 preprocessing:
   filter: gaussian        # gaussian | mean | none
-  kernel_size: 7          # ímpar (3, 5, 7...); kernel maior borra objetos pequenos
+  kernel_size: 3          # ímpar (3, 5, 7...); kernel maior borra objetos pequenos
 
 calibration:
   # Objeto de referência com dimensão conhecida presente na cena
   reference:
-    type: first_object        # first_object (1º objeto que passa na esteira) |
-                              # rect (objeto retangular em ROI fixa) | circle (moeda) | chessboard
-    # --- type: first_object (referência móvel: 1ª peça a atravessar a cena) ---
+    type: first_object        # a referência é o 1º objeto que passa na esteira (moeda)
     known_length_mm: 35.0     # maior dimensão real da referência (mm) — AJUSTE AQUI
     min_track_frames: 5       # nº mínimo de medições para aceitar o track como referência
     min_length_px: 40         # dimensão mínima em px (rejeita ruído/manchas da esteira)
     max_length_px: 150        # dimensão máxima em px (rejeita riscos/costuras da esteira)
     max_scan_frames: 900      # limite de frames da varredura de calibração
-    # --- type: rect (pendrive de 5,5 cm no canto inferior esquerdo) ---
-    roi: [0.0, 0.5, 0.5, 1.0] # região onde ele aparece, frações [x0, y0, x1, y1]
-                              # (0,0 = canto sup. esquerdo; aqui = quadrante inf. esquerdo)
-    min_area_px: 500          # área mínima do contorno da referência
-    method: sam               # sam (robusto: FastSAM na ROI) | otsu (limiarização simples)
-    # --- type: circle (moeda) ---
-    known_diameter_mm: 27.0   # moeda de R$ 1,00 = 27 mm
-    min_radius_px: 15         # faixa de busca do círculo (ajustar à cena)
-    max_radius_px: 150
-    # --- type: chessboard (padrão xadrez) ---
-    chessboard:
-      cols: 9                 # cantos internos (colunas)
-      rows: 6                 # cantos internos (linhas)
-      square_size_mm: 20.0
   n_frames: 15                # frames usados na calibração (mediana)
 
 segmentation:

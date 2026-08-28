@@ -10,6 +10,16 @@ RED = (0, 0, 255)
 BLUE = (255, 160, 0)
 WHITE = (255, 255, 255)
 
+FONT_SCALE = 0.6
+LINE_SPACING = 20
+
+
+def _put_label(frame: np.ndarray, lines: list[str], x: int, y: int, color: tuple) -> None:
+    """Escreve linhas de texto no frame."""
+    for i, line in enumerate(lines):
+        pos = (x, y + i * LINE_SPACING)
+        cv2.putText(frame, line, pos, cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, color, 1, cv2.LINE_AA)
+
 
 def draw_object(
     frame: np.ndarray,
@@ -35,10 +45,33 @@ def draw_object(
     ]
     x, y = measurement.box_points.min(axis=0)
     y = max(int(y) - 8, 15)
-    for i, line in enumerate(lines):
-        pos = (int(x), y + i * 18)
-        cv2.putText(frame, line, pos, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(frame, line, pos, cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
+    _put_label(frame, lines, int(x), y, WHITE)
+
+
+def draw_reference(
+    frame: np.ndarray,
+    mask: np.ndarray,
+    measurement: Measurement,
+    track_id: int,
+) -> None:
+    """Desenha a referência móvel (1º objeto da esteira) em azul, sem classificar.
+
+    Mostra a medida ao vivo — deve bater com a dimensão conhecida do config,
+    servindo de verificação visual da escala.
+    """
+    overlay = frame.copy()
+    overlay[mask > 0] = BLUE
+    cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, dst=frame)
+
+    cv2.drawContours(frame, [measurement.box_points], 0, BLUE, 2)
+
+    lines = [
+        f"#{track_id} REF",
+        f"C: {measurement.length_mm:.1f}mm",
+    ]
+    x, y = measurement.box_points.min(axis=0)
+    y = max(int(y) - 8, 15)
+    _put_label(frame, lines, int(x), y, BLUE)
 
 
 def draw_calibration(frame: np.ndarray, center: tuple | None, radius_px: float | None, scale: float) -> None:
@@ -47,6 +80,4 @@ def draw_calibration(frame: np.ndarray, center: tuple | None, radius_px: float |
         cv2.circle(frame, center, int(radius_px), BLUE, 2)
         cv2.putText(frame, "REF", (center[0] - 15, center[1] + 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, BLUE, 2, cv2.LINE_AA)
-    text = f"Escala: {scale:.4f} mm/px"
-    cv2.putText(frame, text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 3, cv2.LINE_AA)
-    cv2.putText(frame, text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, WHITE, 1, cv2.LINE_AA)
+    _put_label(frame, [f"Escala: {scale:.4f} mm/px"], 10, 25, WHITE)
