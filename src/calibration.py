@@ -22,6 +22,7 @@ class CalibrationResult:
     reference_radius_px: float | None  # raio em px (se moeda)
     n_samples: int                  # nº de frames em que a referência foi detectada
     reference_end_frame: int | None = None  # último frame da referência móvel (modo first_object)
+    reference_corners: np.ndarray | None = None  # 4 cantos do marcador (modo aruco)
 
 
 def detect_circle_reference(
@@ -48,6 +49,57 @@ def detect_circle_reference(
     # HoughCircles ordena por acumulador: o primeiro é o mais confiável
     cx, cy, r = circles[0][0]
     return (int(cx), int(cy)), float(r)
+
+
+def detect_aruco_reference(
+    gray: np.ndarray, detector: "cv2.aruco.ArucoDetector", marker_id: int | None = None
+) -> np.ndarray | None:
+    """Detecta um marcador ArUco e devolve seus 4 cantos.
+
+    Ao contrário da detecção por limiar (``detect_rect_reference``), aqui o
+    marcador é de fato decodificado: os cantos vêm com precisão subpixel e um
+    quadrado preto qualquer na cena não é confundido com a referência.
+
+    Args:
+        marker_id: id esperado do marcador; None aceita o primeiro detectado.
+
+    Returns:
+        Array (4, 2) com os cantos em ordem (tl, tr, br, bl) ou None.
+    """
+    corners, ids, _ = detector.detectMarkers(gray)
+    if ids is None or len(ids) == 0:
+        return None
+    for c, i in zip(corners, ids.ravel()):
+        if marker_id is None or int(i) == int(marker_id):
+            return c.reshape(4, 2)
+    return None
+
+
+def _aruco_scale_from_corners(
+    corners: np.ndarray, known_mm: float | list
+) -> float:
+    """Converte os 4 cantos do marcador em escala mm/px.
+
+    ``known_mm`` pode ser um escalar (marcador quadrado) ou uma lista
+    ``[horizontal_mm, vertical_mm]`` para impressões fora de esquadro: cada
+    lado do quadrilátero é classificado pela orientação NA IMAGEM e casado
+    com a dimensão real correspondente; a escala final é a média das duas.
+    """
+    sides = [(corners[k], corners[(k + 1) % 4]) for k in range(4)]
+    if not isinstance(known_mm, (list, tuple)):
+        mean_px = float(np.mean([np.linalg.norm(b - a) for a, b in sides]))
+        return float(known_mm) / mean_px
+
+    horiz_px, vert_px = [], []
+    for a, b in sides:
+        dx, dy = b - a
+        (horiz_px if abs(dx) > abs(dy) else vert_px).append(float(np.hypot(dx, dy)))
+    if not horiz_px or not vert_px:  # marcador a ~45°: orientação ambígua
+        mean_px = float(np.mean([np.linalg.norm(b - a) for a, b in sides]))
+        return float(np.mean(known_mm)) / mean_px
+    scale_x = float(known_mm[0]) / float(np.mean(horiz_px))
+    scale_y = float(known_mm[1]) / float(np.mean(vert_px))
+    return (scale_x + scale_y) / 2
 
 
 def detect_rect_reference(
@@ -335,11 +387,14 @@ def calibrate_from_video(
             ``first_object`` (referência móvel na esteira).
     """
     ref = cfg["reference"]
+    # compensa a diferença de altura entre o plano da referência e o plano
+    # das peças: <1 se a referência está mais longe da câmera que as peças
+    correction = float(cfg.get("scale_correction", 1.0))
 
     if ref["type"] == "first_object":
         if segmenter is None:
             raise ValueError("calibração 'first_object' requer o FastSAM (segmenter)")
-        return calibrate_first_object(
+        result = calibrate_first_object(
             video_path,
             cfg,
             segmenter,
@@ -347,8 +402,18 @@ def calibrate_from_video(
             preprocessing_cfg=preprocessing_cfg,
             frame_stride=frame_stride,
         )
+        result.scale_mm_per_px *= correction
+        return result
 
     n_frames = int(cfg.get("n_frames", 15))
+
+    aruco_detector = None
+    if ref["type"] == "aruco":
+        dict_name = ref.get("dictionary", "DICT_6X6_50")
+        dictionary = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, dict_name))
+        aruco_detector = cv2.aruco.ArucoDetector(
+            dictionary, cv2.aruco.DetectorParameters()
+        )
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -357,6 +422,7 @@ def calibrate_from_video(
     scales: list[float] = []
     centers: list[tuple[int, int]] = []
     radii: list[float] = []
+    corners_samples: list[np.ndarray] = []
 
     read_frames = 0
     while len(scales) < n_frames and read_frames < n_frames * 10:
@@ -366,7 +432,21 @@ def calibrate_from_video(
         read_frames += 1
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        if ref["type"] == "circle":
+        if ref["type"] == "aruco":
+            marker_id = ref.get("marker_id")
+            corners = detect_aruco_reference(gray, aruco_detector, marker_id)
+            if corners is None:
+                continue
+            scales.append(_aruco_scale_from_corners(corners, ref["known_length_mm"]))
+            center = corners.mean(axis=0)
+            centers.append((int(center[0]), int(center[1])))
+            # meia diagonal maior: raio da zona de exclusão em volta do marcador
+            radii.append(float(max(
+                np.linalg.norm(corners[0] - corners[2]),
+                np.linalg.norm(corners[1] - corners[3]),
+            ) / 2))
+            corners_samples.append(corners)
+        elif ref["type"] == "circle":
             det = detect_circle_reference(
                 gray, int(ref["min_radius_px"]), int(ref["max_radius_px"])
             )
@@ -416,8 +496,11 @@ def calibrate_from_video(
         radius = float(np.median(radii))
 
     return CalibrationResult(
-        scale_mm_per_px=float(np.median(scales)),
+        scale_mm_per_px=float(np.median(scales)) * correction,
         reference_center=center,
         reference_radius_px=radius,
         n_samples=len(scales),
+        reference_corners=(
+            np.median(np.stack(corners_samples), axis=0) if corners_samples else None
+        ),
     )

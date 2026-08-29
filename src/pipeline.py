@@ -99,7 +99,7 @@ def run_pipeline(cfg: dict, video_path: str | None = None, show: bool = False) -
             track_first_frame.setdefault(tid, current_frame)
 
         annotated = frame.copy()
-        draw_calibration(annotated, calib.reference_center, calib.reference_radius_px, calib.scale_mm_per_px)
+        draw_calibration(annotated, calib.reference_center, calib.reference_radius_px, calib.scale_mm_per_px, corners=calib.reference_corners)
 
         # ---------------- Fase 3: metrologia ----------------
         for j, obj in enumerate(objects):

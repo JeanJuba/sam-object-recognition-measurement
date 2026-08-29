@@ -39,6 +39,14 @@ python -m venv .venv
 
 Na primeira execução o peso `FastSAM-s.pt` (~23 MB) é baixado automaticamente.
 
+Para o vídeo anotado sair em H.264 pelo FFmpeg (senão o OpenCV usa um fallback e
+imprime erros de "Failed to load OpenH264"), baixe o codec da Cisco para a raiz
+do projeto (o `main.py` deve ser executado a partir dela):
+
+```powershell
+.venv\Scripts\python -c "import urllib.request, bz2; open('openh264-2.5.0-win64.dll','wb').write(bz2.decompress(urllib.request.urlopen('http://ciscobinary.openh264.org/openh264-2.5.0-win64.dll.bz2').read()))"
+```
+
 ## Uso
 
 ```powershell

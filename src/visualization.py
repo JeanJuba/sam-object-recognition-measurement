@@ -74,10 +74,23 @@ def draw_reference(
     _put_label(frame, lines, int(x), y, BLUE)
 
 
-def draw_calibration(frame: np.ndarray, center: tuple | None, radius_px: float | None, scale: float) -> None:
-    """Marca o objeto de referência e mostra o fator de escala."""
-    if center is not None and radius_px is not None:
+def draw_calibration(
+    frame: np.ndarray,
+    center: tuple | None,
+    radius_px: float | None,
+    scale: float,
+    corners: np.ndarray | None = None,
+) -> None:
+    """Marca o objeto de referência e mostra o fator de escala.
+
+    Com ``corners`` (modo aruco) desenha o contorno do marcador; sem eles,
+    o círculo aproximado (moeda/retângulo por limiar).
+    """
+    if corners is not None:
+        cv2.polylines(frame, [corners.astype(np.int32)], True, BLUE, 3)
+    elif center is not None and radius_px is not None:
         cv2.circle(frame, center, int(radius_px), BLUE, 2)
+    if center is not None:
         cv2.putText(frame, "REF", (center[0] - 15, center[1] + 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, BLUE, 2, cv2.LINE_AA)
     _put_label(frame, [f"Escala: {scale:.4f} mm/px"], 10, 25, WHITE)
