@@ -66,6 +66,72 @@ class SamSegmenter:
         return points
 
     # ------------------------------------------------------------------
+    # Refinamento da máscara: mantém só a face superior (mais clara)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def refine_top_face(gray: np.ndarray, mask: np.ndarray, cfg: dict) -> list[np.ndarray]:
+        """Remove da máscara a face lateral sombreada do objeto.
+
+        Com a câmera angulada, objetos com altura (ex.: borrachas) mostram a
+        lateral além da face superior, inflando área e contorno. Um limiar de
+        Otsu sobre o brilho dos pixels da máscara separa a face superior
+        (clara) da lateral (escura); ficam as componentes claras relevantes,
+        com os buracos internos preenchidos.
+
+        Devolve uma lista de máscaras: peças encostadas que o SAM funde numa
+        máscara só (ex.: par de borrachas) têm faces superiores separadas
+        pelo vão sombreado e viram objetos individuais.
+
+        Salvaguardas — devolve ``[máscara original]`` quando:
+        * o contraste topo/lateral é baixo (objeto sem lateral visível);
+        * a parte mantida ficaria pequena demais (limiar cortou o objeto);
+        * quase nada foi removido (refino irrelevante).
+        """
+        vals = gray[mask > 0]
+        if vals.size < 50:
+            return [mask]
+        thr, _ = cv2.threshold(vals.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        bright_vals = vals[vals >= thr]
+        dark_vals = vals[vals < thr]
+        if bright_vals.size == 0 or dark_vals.size == 0:
+            return [mask]
+        contrast = float(bright_vals.mean()) - float(dark_vals.mean())
+        if contrast < float(cfg.get("min_contrast", 25)):
+            return [mask]
+
+        bright = np.zeros_like(mask)
+        bright[(mask > 0) & (gray >= thr)] = 255
+        bright = cv2.morphologyEx(bright, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+
+        contours, _ = cv2.findContours(bright, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return [mask]
+
+        # mantém toda componente clara relevante (>= fração da maior);
+        # o contorno externo é preenchido para que manchas escuras dentro
+        # da face superior (sujeira, textura) não virem buracos
+        areas = [cv2.contourArea(c) for c in contours]
+        largest = max(areas)
+        min_component = largest * float(cfg.get("min_component_ratio", 0.3))
+        refined_masks = []
+        kept_px = 0
+        for contour, area in zip(contours, areas):
+            if area < min_component:
+                continue
+            refined = np.zeros_like(mask)
+            cv2.drawContours(refined, [contour], -1, 255, cv2.FILLED)
+            refined_masks.append(refined)
+            kept_px += cv2.countNonZero(refined)
+
+        keep_ratio = kept_px / max(cv2.countNonZero(mask), 1)
+        if keep_ratio < float(cfg.get("min_keep_ratio", 0.3)):
+            return [mask]
+        if keep_ratio > float(cfg.get("max_keep_ratio", 0.95)):
+            return [mask]
+        return refined_masks
+
+    # ------------------------------------------------------------------
     # Segmentação de um frame
     # ------------------------------------------------------------------
     def segment(
@@ -109,13 +175,32 @@ class SamSegmenter:
         margin = int(cfg.get("border_margin_px", 5))
         max_aspect = float(cfg.get("max_aspect_ratio", 0))  # 0 = desativado
 
-        objects: list[SegmentedObject] = []
+        refine_cfg = cfg.get("refine_top_face") or {}
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if refine_cfg.get("enabled") else None
+
+        candidates: list[np.ndarray] = []
         for mask_t in r.masks.data:
             mask = (mask_t.cpu().numpy() > 0.5).astype(np.uint8) * 255
             if mask.shape != (h, w):
                 mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+            area = float(cv2.countNonZero(mask))
+            if area < min_area or area > max_area:
+                continue
+            candidates.append(mask)
 
-            area = float(np.count_nonzero(mask)) / 255 * 255  # nº de pixels ativos
+        # dedup ANTES do refino: variantes da mesma peça (objeto, objeto+sombra)
+        # se sobrepõem quase totalmente agora, mas refinadas encolhem para
+        # fragmentos claros distintos e escapariam da supressão final
+        candidates = self._dedup_masks(candidates)
+
+        if gray is not None:
+            refined: list[np.ndarray] = []
+            for mask in candidates:
+                refined.extend(self.refine_top_face(gray, mask, refine_cfg))
+            candidates = refined
+
+        objects: list[SegmentedObject] = []
+        for mask in candidates:
             area = float(cv2.countNonZero(mask))
             if area < min_area or area > max_area:
                 continue
@@ -151,6 +236,27 @@ class SamSegmenter:
         # remove máscaras duplicadas/aninhadas (o modo everything às vezes
         # devolve o mesmo objeto mais de uma vez)
         return self._suppress_duplicates(objects)
+
+    @staticmethod
+    def _dedup_masks(masks: list[np.ndarray], iou_thr: float = 0.7) -> list[np.ndarray]:
+        """Remove máscaras duplicadas/aninhadas, mantendo sempre a maior."""
+        masks = sorted(masks, key=cv2.countNonZero, reverse=True)
+        kept: list[np.ndarray] = []
+        for mask in masks:
+            area = float(cv2.countNonZero(mask))
+            duplicate = False
+            for k in kept:
+                inter = cv2.countNonZero(cv2.bitwise_and(mask, k))
+                union = cv2.countNonZero(cv2.bitwise_or(mask, k))
+                if union > 0 and inter / union > iou_thr:
+                    duplicate = True
+                    break
+                if inter / max(area, 1.0) > 0.85:
+                    duplicate = True
+                    break
+            if not duplicate:
+                kept.append(mask)
+        return kept
 
     @staticmethod
     def _suppress_duplicates(objects: list[SegmentedObject], iou_thr: float = 0.7) -> list[SegmentedObject]:

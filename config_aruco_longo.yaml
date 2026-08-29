@@ -1,13 +1,13 @@
 # =====================================================================
-# Configuração para o vídeo arunco_longo.mp4 (1080x1920 vertical, 60s):
+# Configuração para o vídeo aruco_longo.mp4 (1080x1920 vertical, 60s):
 # marcador ArUco impresso em papel no topo à esquerda como referência
 # estática; objetos brancos (borrachas/cápsulas) sobre tecido preto na
 # metade de baixo do quadro. Uso:
-#   python main.py --config config_arunco_longo.yaml run
+#   python main.py --config config_aruco_longo.yaml run
 # =====================================================================
 
 video:
-  input_path: data/videos/arunco_longo.mp4  # vídeo a ser processado
+  input_path: data/videos/aruco_longo.mp4  # vídeo a ser processado
   frame_stride: 3                     # processa 1 a cada N frames (desempenho)
   output_dir: data/output             # onde salvar vídeo anotado e CSVs
 
@@ -42,6 +42,11 @@ segmentation:
                           # do frame mas é excluído pela zona da calibração)
   border_margin_px: 8     # descarta máscaras coladas na borda do frame
   max_aspect_ratio: 8     # descarta máscaras muito alongadas; 0 = desliga
+  refine_top_face:        # borrachas com topo claro: remove a lateral sombreada
+    enabled: true         # que aparece pela câmera angulada (contorno/área só do topo)
+    min_contrast: 25      # diferença mínima de brilho topo vs. lateral para refinar
+    min_keep_ratio: 0.3   # se sobrar menos que isso da máscara, mantém a original
+    max_keep_ratio: 0.95  # se quase nada foi removido, mantém a original
 
 tracking:
   max_distance_px: 150    # distância máx. de associação entre frames

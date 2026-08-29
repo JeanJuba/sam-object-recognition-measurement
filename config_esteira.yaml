@@ -36,6 +36,11 @@ segmentation:
   max_area_ratio: 0.35    # descarta máscaras > 35% do frame (fundo/bancada)
   border_margin_px: 5     # descarta máscaras coladas na borda do frame
   max_aspect_ratio: 8     # descarta máscaras muito alongadas (riscos da esteira); 0 = desliga
+  refine_top_face:        # remove a lateral sombreada de objetos com altura (câmera angulada)
+    enabled: true
+    min_contrast: 25      # diferença mínima de brilho topo vs. lateral para refinar
+    min_keep_ratio: 0.3   # se sobrar menos que isso da máscara, mantém a original
+    max_keep_ratio: 0.95  # se quase nada foi removido, mantém a original
 
 tracking:
   max_distance_px: 120    # distância máx. de associação entre frames

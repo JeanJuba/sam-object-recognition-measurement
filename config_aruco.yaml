@@ -1,12 +1,12 @@
 # =====================================================================
-# Configuração para o vídeo arunco.mp4 (848x478, 50s): pares de
+# Configuração para o vídeo aruco.mp4 (848x478, 50s): pares de
 # borrachas lado a lado na esteira azul (vertical, à esquerda) e
 # marcador ArUco impresso à direita como referência estática. Uso:
-#   python main.py --config config_arunco.yaml run
+#   python main.py --config config_aruco.yaml run
 # =====================================================================
 
 video:
-  input_path: data/videos/arunco.mp4  # vídeo a ser processado
+  input_path: data/videos/aruco.mp4  # vídeo a ser processado
   frame_stride: 2                     # processa 1 a cada N frames (desempenho)
   output_dir: data/output             # onde salvar vídeo anotado e CSVs
 
@@ -39,6 +39,11 @@ segmentation:
   max_area_ratio: 0.30    # descarta máscaras grandes (papel, capacete, esteira)
   border_margin_px: 5     # descarta máscaras coladas na borda do frame
   max_aspect_ratio: 8     # descarta máscaras muito alongadas (bordas da esteira); 0 = desliga
+  refine_top_face:        # borrachas com topo branco: remove a lateral sombreada
+    enabled: true         # que aparece pela câmera angulada (contorno/área só do topo)
+    min_contrast: 25      # diferença mínima de brilho topo vs. lateral para refinar
+    min_keep_ratio: 0.3   # se sobrar menos que isso da máscara, mantém a original
+    max_keep_ratio: 0.95  # se quase nada foi removido, mantém a original
 
 tracking:
   max_distance_px: 120    # distância máx. de associação entre frames
@@ -47,10 +52,11 @@ tracking:
 
 classification:
   # Faixas ajustadas ao MEDIDO no vídeo assumindo marcador de 100 mm.
-  # As borrachas andam em pares lado a lado: o SAM ora funde o par
-  # (~60x25 mm), ora separa a borracha individual (~29x25 mm) — por
-  # isso as duas classes. Meça o marcador (régua) e as borrachas
-  # (paquímetro) reais e ajuste known_length_mm e estas faixas.
+  # As borrachas andam em pares lado a lado; com refine_top_face o vão
+  # sombreado entre elas separa o par em duas borrachas individuais
+  # (~29x22 mm). par_borrachas fica como reserva para o caso raro de as
+  # faces superiores saírem fundidas. Meça o marcador (régua) e as
+  # borrachas (paquímetro) reais e ajuste known_length_mm e estas faixas.
   classes:
     - name: par_borrachas
       length_mm: [55.0, 67.0]
