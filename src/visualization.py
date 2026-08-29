@@ -21,6 +21,12 @@ def _put_label(frame: np.ndarray, lines: list[str], x: int, y: int, color: tuple
         cv2.putText(frame, line, pos, cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, color, 1, cv2.LINE_AA)
 
 
+def _draw_mask_outline(frame: np.ndarray, mask: np.ndarray, color: tuple) -> None:
+    """Desenha o contorno real da máscara (a borda do objeto, não a caixa)."""
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(frame, contours, -1, color, 2, cv2.LINE_AA)
+
+
 def draw_object(
     frame: np.ndarray,
     mask: np.ndarray,
@@ -28,14 +34,14 @@ def draw_object(
     classification: Classification,
     track_id: int,
 ) -> None:
-    """Desenha máscara, retângulo mínimo e rótulo de uma peça (in-place)."""
+    """Desenha máscara, contorno real e rótulo de uma peça (in-place)."""
     color = GREEN if classification.approved else RED
 
     overlay = frame.copy()
     overlay[mask > 0] = color
     cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, dst=frame)
 
-    cv2.drawContours(frame, [measurement.box_points], 0, color, 2)
+    _draw_mask_outline(frame, mask, color)
 
     status = "APROVADO" if classification.approved else "REPROVADO"
     lines = [
@@ -63,7 +69,7 @@ def draw_reference(
     overlay[mask > 0] = BLUE
     cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, dst=frame)
 
-    cv2.drawContours(frame, [measurement.box_points], 0, BLUE, 2)
+    _draw_mask_outline(frame, mask, BLUE)
 
     lines = [
         f"#{track_id} REF",
