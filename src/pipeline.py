@@ -6,7 +6,7 @@ import time
 import cv2
 
 from .calibration import calibrate_from_video
-from .metrology import classify, measure_mask
+from .metrology import classify, measure_mask, median_measurement
 from .preprocessing import apply_filter
 from .report import summarize_tracks
 from .segmentation import SamSegmenter
@@ -70,7 +70,10 @@ def run_pipeline(cfg: dict, video_path: str | None = None, show: bool = False) -
 
     pcfg = cfg["preprocessing"]
     classes_cfg = cfg["classification"]["classes"]
+    # janela da mediana móvel usada só nos rótulos do vídeo (estabilidade visual)
+    label_window = int(cfg["video"].get("label_smoothing_frames", 15))
     track_first_frame: dict[int, int] = {}  # 1º frame de cada track (p/ marcar REF)
+    ref_history: dict[int, list] = {}       # medições da referência móvel (p/ rótulo)
     frame_idx = 0
     processed = 0
     t0 = time.time()
@@ -112,11 +115,15 @@ def run_pipeline(cfg: dict, video_path: str | None = None, show: bool = False) -
                 calib.reference_end_frame is not None
                 and track_first_frame[tid] <= calib.reference_end_frame
             ):
-                draw_reference(annotated, obj.mask, m, tid)
+                ref_history.setdefault(tid, []).append(m)
+                m_disp = median_measurement(ref_history[tid], label_window)
+                draw_reference(annotated, obj.mask, m_disp, tid)
                 continue
             tracker.active[tid].measurements.append(m)
-            cls = classify(m.length_mm, m.width_mm, classes_cfg)
-            draw_object(annotated, obj.mask, m, cls, tid)
+            # rótulo usa a mediana móvel (estável); o CSV usa a mediana do track
+            m_disp = median_measurement(tracker.active[tid].measurements, label_window)
+            cls = classify(m_disp.length_mm, m_disp.width_mm, classes_cfg)
+            draw_object(annotated, obj.mask, m_disp, cls, tid)
 
         writer.write(annotated)
         if show:

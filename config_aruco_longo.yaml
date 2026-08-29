@@ -25,9 +25,14 @@ calibration:
     known_length_mm: [98.5, 96.5] # [horizontal, vertical] NA IMAGEM, medidos com
                                # régua (largura x altura; impressão fora de
                                # esquadro); a escala é a média das duas direções
-  scale_correction: 0.96       # o papel do marcador está ~4% mais distante da
-                               # câmera que o plano das borrachas na esteira;
-                               # reduz a escala para valer no plano das peças
+  scale_correction: 0.80       # correção de plano IDENTIFICADA COM O PAQUÍMETRO
+                               # (2026-08-29): as peças medidas com escala do
+                               # marcador saíam ~20% maiores que o real, de forma
+                               # consistente em todas — o papel do marcador está
+                               # bem mais distante da câmera que o plano das
+                               # borrachas. Fator = mediana(real/medido) x 0.96
+                               # anterior. Engloba também eventual erro da
+                               # dimensão impressa — conferir marcador com régua.
   n_frames: 15                 # frames usados na calibração (mediana)
 
 segmentation:
@@ -54,17 +59,19 @@ tracking:
   min_hits: 3             # detecções mínimas para o track ser considerado válido
 
 classification:
-  # Três tipos de borracha no vídeo: retangular (em dois tamanhos, ~53x29
-  # e ~40x33 — faixa larga cobre os dois), oval (~58x44) e ponteira de
-  # lápis (~37x17). Faixas medidas no próprio vídeo com o marcador de
-  # 96,5 mm; ajuste com o paquímetro sobre as peças reais.
+  # Quatro tipos de borracha, dimensões nominais MEDIDAS COM PAQUÍMETRO
+  # (2026-08-29): retangular 42x21, quadrada 32x23, ponteira 30x13 (13 na
+  # parte mais larga) e oval 48x36. Tolerância de ±3 mm em cada dimensão.
   classes:
     - name: borracha_retangular
-      length_mm: [36.0, 60.0]
-      width_mm: [25.0, 35.0]
-    - name: borracha_oval
-      length_mm: [52.0, 63.0]
-      width_mm: [39.0, 50.0]
+      length_mm: [39.0, 45.0]
+      width_mm: [18.0, 24.0]
+    - name: borracha_quadrada
+      length_mm: [29.0, 35.0]
+      width_mm: [20.0, 26.0]
     - name: borracha_ponteira
-      length_mm: [31.0, 43.0]
-      width_mm: [13.0, 21.0]
+      length_mm: [27.0, 33.0]
+      width_mm: [10.0, 16.0]
+    - name: borracha_oval
+      length_mm: [45.0, 51.0]
+      width_mm: [33.0, 39.0]

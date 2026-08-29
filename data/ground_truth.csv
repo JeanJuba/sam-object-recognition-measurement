@@ -1,1 +1,8 @@
-track_id,comprimento_real_mm,largura_real_mm
+track_id,tipo,comprimento_real_mm,largura_real_mm
+1,retangular,42.0,21.0
+2,quadrada,32.0,23.0
+3,ponteira,30.0,13.0
+4,retangular,42.0,21.0
+5,ponteira,30.0,13.0
+6,oval,48.0,36.0
+7,retangular,42.0,21.0

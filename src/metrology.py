@@ -55,6 +55,24 @@ def measure_mask(mask: np.ndarray, scale_mm_per_px: float) -> Measurement | None
     )
 
 
+def median_measurement(history: list[Measurement], window: int = 15) -> Measurement:
+    """Mediana móvel das últimas medições de um track — só para EXIBIÇÃO.
+
+    Estabiliza os números do rótulo no vídeo (a borda da máscara treme
+    ±1-2 px entre frames); a consolidação oficial do CSV continua sendo a
+    mediana do track inteiro em ``report.summarize_tracks``.
+    """
+    recent = history[-window:]
+    last = recent[-1]
+    return Measurement(
+        length_mm=float(np.median([m.length_mm for m in recent])),
+        width_mm=float(np.median([m.width_mm for m in recent])),
+        area_mm2=float(np.median([m.area_mm2 for m in recent])),
+        rect=last.rect,                # geometria do frame atual,
+        box_points=last.box_points,    # p/ posicionar o rótulo
+    )
+
+
 def classify(length_mm: float, width_mm: float, classes_cfg: list[dict]) -> Classification:
     """Atribui a peça à classe mais próxima e verifica as tolerâncias.
 
